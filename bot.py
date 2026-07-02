@@ -99,4 +99,34 @@ valid_prices = {o: p for o, p in results.items() if p is not None}
 # Build daily summary email
 summary = "Daily Flight Price Summary\n\n"
 summary += f"Route: {ORIGINS} → {DESTINATION}\n"
-summary += f"Depart: {DEPART_DATE}\nReturn: {RETURN_DATE}\n\n
+summary += f"Depart: {DEPART_DATE}\nReturn: {RETURN_DATE}\n\n"
+
+for origin, price in results.items():
+    summary += f"{origin}: {price}\n"
+
+if valid_prices:
+    best_origin = min(valid_prices, key=valid_prices.get)
+    best_price = valid_prices[best_origin]
+    summary += f"\nLowest NON-STOP price: ${best_price} from {best_origin}\n"
+else:
+    summary += "\nNo valid NON-STOP prices found today.\n"
+
+# Send daily summary email
+print("Sending daily summary email...")
+send_daily_summary(summary)
+
+# Send alert if below threshold
+if valid_prices:
+    best_origin = min(valid_prices, key=valid_prices.get)
+    best_price = valid_prices[best_origin]
+
+    if best_price < THRESHOLD:
+        alert_msg = (
+            f"🔥 Price Alert!\n\n"
+            f"{best_origin} → {DESTINATION}\n"
+            f"Depart: {DEPART_DATE}\nReturn: {RETURN_DATE}\n"
+            f"NON-STOP price: ${best_price}\n\n"
+            f"Below your threshold of ${THRESHOLD}."
+        )
+        print("Sending email + SMS alert...")
+        send_alert(alert_msg)
