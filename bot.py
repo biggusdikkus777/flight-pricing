@@ -1,48 +1,126 @@
 import requests
+import os
 import smtplib
 from email.mime.text import MIMEText
 
-API_KEY = "YOUR_IGNAV_API_KEY"
+# --- CONFIGURATION ---
 
-ORIGIN = "IAH"
-DEST = "BOS"
-DATE = "2024-09-12"
-THRESHOLD = 220
+API_KEY = os.getenv("TRAVELPAYOUTS_API_KEY")
+EMAIL_PASSWORD = os.getenv("EMAIL_PASSWORD")  # Gmail app password
 
-EMAIL_FROM = "your_email@gmail.com"
-EMAIL_TO = "your_email@gmail.com"
-EMAIL_PASSWORD = "your_app_password"  # Gmail app password
+FROM_EMAIL = "tom.scire@gmail.com"      # <-- update this
+TO_EMAIL = "tom.scire@gmail.com"        # <-- daily summary email
+SMS_EMAIL = "8327256861@vtext.com"            # Verizon SMS gateway (free SMS)
 
-def check_price():
-    url = "https://api.ignav.com/flights/search"
-    params = {
-        "origin": ORIGIN,
-        "destination": DEST,
-        "departureDate": DATE,
-        "adults": 1
-    }
-    headers = {"Authorization": f"Bearer {API_KEY}"}
+ORIGINS = ["IAH", "HOU"]                      # Multiple Houston airports
+DESTINATION = "BZE"
+DEPART_DATE = "2027-01-30"
+RETURN_DATE = "2027-02-07"
+THRESHOLD = 500                               # Updated threshold
 
-    r = requests.get(url, params=params, headers=headers)
-    data = r.json()
 
-    lowest = data["results"][0]["price"]
-    return lowest
+# --- EMAIL FUNCTIONS ---
 
-def send_email(price):
-    msg = MIMEText(f"🔥 Flight price dropped to ${price}!")
-    msg["Subject"] = "Flight Price Alert"
-    msg["From"] = EMAIL_FROM
-    msg["To"] = EMAIL_TO
+def send_email(subject, message, recipients):
+    msg = MIMEText(message)
+    msg["Subject"] = subject
+    msg["From"] = FROM_EMAIL
+    msg["To"] = ", ".join(recipients)
 
     with smtplib.SMTP_SSL("smtp.gmail.com", 465) as server:
-        server.login(EMAIL_FROM, EMAIL_PASSWORD)
-        server.sendmail(EMAIL_FROM, EMAIL_TO, msg.as_string())
+        server.login(FROM_EMAIL, EMAIL_PASSWORD)
+        server.sendmail(FROM_EMAIL, recipients, msg.as_string())
 
-price = check_price()
 
-if price < THRESHOLD:
-    send_email(price)
-    print("Alert sent!")
+def send_alert(message):
+    # Sends both email + SMS
+    send_email("Flight Price Alert", message, [TO_EMAIL, SMS_EMAIL])
+
+
+def send_daily_summary(message):
+    # Sends only email
+    send_email("Daily Flight Price Summary", message, [TO_EMAIL])
+
+
+# --- PRICE CHECK FUNCTION (NON-STOP ONLY) ---
+
+def check_price(origin):
+    url = "https://api.travelpayouts.com/aviasales/v3/prices"
+    params = {
+        "origin": origin,
+        "destination": DESTINATION,
+        "depart_date": DEPART_DATE,
+        "return_date": RETURN_DATE,
+        "currency": "usd",
+        "token": API_KEY
+    }
+
+    r = requests.get(url, params=params)
+    data = r.json()
+
+    offers = data.get("data", [])
+
+    if not offers:
+        print(f"No offers returned for {origin}.")
+        return None
+
+    # Filter for NON-STOP flights only
+    nonstop_offers = [o for o in offers if o.get("number_of_changes", 99) == 0]
+
+    if not nonstop_offers:
+        print(f"No NON-STOP flights found for {origin}.")
+        return None
+
+    # Lowest non-stop price
+    lowest = nonstop_offers[0]["value"]
+    return lowest
+
+
+# --- MAIN LOGIC ---
+
+results = {}
+
+for origin in ORIGINS:
+    price = check_price(origin)
+    results[origin] = price
+
+print("\n--- Price Results ---")
+for origin, price in results.items():
+    print(f"{origin}: {price}")
+
+valid_prices = {o: p for o, p in results.items() if p is not None}
+
+# Build daily summary email
+summary = "Daily Flight Price Summary\n\n"
+summary += f"Route: {ORIGINS} → {DESTINATION}\n"
+summary += f"Depart: {DEPART_DATE}\nReturn: {RETURN_DATE}\n\n"
+
+for origin, price in results.items():
+    summary += f"{origin}: {price}\n"
+
+if valid_prices:
+    best_origin = min(valid_prices, key=valid_prices.get)
+    best_price = valid_prices[best_origin]
+    summary += f"\nLowest NON-STOP price: ${best_price} from {best_origin}\n"
 else:
-    print(f"Current price ${price} is above threshold.")
+    summary += "\nNo valid NON-STOP prices found today.\n"
+
+# Send daily summary email
+print("Sending daily summary email...")
+send_daily_summary(summary)
+
+# Send alert if below threshold
+if valid_prices:
+    best_origin = min(valid_prices, key=valid_prices.get)
+    best_price = valid_prices[best_origin]
+
+    if best_price < THRESHOLD:
+        alert_msg = (
+            f"🔥 Price Alert!\n\n"
+            f"{best_origin} → {DESTINATION}\n"
+            f"Depart: {DEPART_DATE}\nReturn: {RETURN_DATE}\n"
+            f"NON-STOP price: ${best_price}\n\n"
+            f"Below your threshold of ${THRESHOLD}."
+        )
+        print("Sending email + SMS alert...")
+        send_alert(alert_msg)
