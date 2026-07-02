@@ -42,50 +42,56 @@ def send_daily_summary(message):
 # --- GOOGLE FLIGHTS JSON INTERCEPT ---
 
 def get_nonstop_price(url):
-    """
-    Loads Google Flights, intercepts JSON API calls, extracts NON-STOP prices.
-    """
+    from playwright.sync_api import sync_playwright
 
     with sync_playwright() as p:
         browser = p.chromium.launch(headless=True)
         page = browser.new_page()
 
+        # Block heavy resources to speed things up
+        page.route("**/*", lambda route, request: (
+            route.abort()
+            if request.resource_type in ["image", "media", "font", "stylesheet"]
+            else route.continue_()
+        ))
+
+        page.goto(url, wait_until="domcontentloaded")
+
+        # Wait for results to render
+        try:
+            page.wait_for_selector('div[aria-label*="Nonstop"]', timeout=10000)
+        except Exception:
+            browser.close()
+            return None
+
+        # Find all NON-STOP flight cards
+        cards = page.query_selector_all('div[aria-label*="Nonstop"]')
+
         prices = []
 
-        # Intercept Google Flights internal JSON API calls
-        def handle_response(response):
-            try:
-                if "GetShoppingResults" in response.url and response.status == 200:
-                    data = response.json()
+        for card in cards:
+            # Look for a price element inside the card
+            price_el = card.query_selector('span[aria-label^="$"]')
+            if not price_el:
+                continue
 
-                    # Navigate JSON structure
-                    trips = data.get("searchResults", {}).get("trips", [])
-                    for trip in trips:
-                        slices = trip.get("slice", [])
-                        if not slices:
-                            continue
+            text = price_el.get_attribute("aria-label") or price_el.inner_text()
+            if not text:
+                continue
 
-                        # Check NON-STOP (no layovers)
-                        nonstop = all(len(s.get("segment", [])) == 1 for s in slices)
-                        if not nonstop:
-                            continue
-
-                        price_info = trip.get("pricing", {}).get("totalPrice", {})
-                        amount = price_info.get("amount")
-                        if amount:
-                            prices.append(int(amount))
-            except Exception:
-                pass
-
-        page.on("response", handle_response)
-
-        page.goto(url, wait_until="networkidle")
+            text = text.replace(",", "").strip()
+            if text.startswith("$"):
+                try:
+                    prices.append(int(text[1:]))
+                except ValueError:
+                    continue
 
         browser.close()
 
-    if not prices:
-        return None
+        if not prices:
+            return None
 
+        return min(prices)
     return min(prices)
 
 
