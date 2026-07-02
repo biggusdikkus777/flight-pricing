@@ -1,4 +1,5 @@
 import os
+import json
 import smtplib
 from email.mime.text import MIMEText
 from playwright.sync_api import sync_playwright
@@ -38,42 +39,54 @@ def send_daily_summary(message):
     send_email("Daily Flight Price Summary", message, [TO_EMAIL])
 
 
-# --- GOOGLE FLIGHTS SCRAPING (NON-STOP ONLY) ---
+# --- GOOGLE FLIGHTS JSON INTERCEPT ---
 
-def extract_price_from_page(page):
-    # This selector targets price text in the main results list.
-    # You may need to tweak it if Google changes layout.
-    elements = page.query_selector_all('div[aria-label*="Nonstop"] span[aria-label^="$"]')
-    prices = []
+def get_nonstop_price(url):
+    """
+    Loads Google Flights, intercepts JSON API calls, extracts NON-STOP prices.
+    """
 
-    for el in elements:
-        text = el.get_attribute("aria-label") or el.inner_text()
-        if not text:
-            continue
-        text = text.replace(",", "").strip()
-        if text.startswith("$"):
+    with sync_playwright() as p:
+        browser = p.chromium.launch(headless=True)
+        page = browser.new_page()
+
+        prices = []
+
+        # Intercept Google Flights internal JSON API calls
+        def handle_response(response):
             try:
-                prices.append(int(text[1:]))
-            except ValueError:
-                continue
+                if "GetShoppingResults" in response.url and response.status == 200:
+                    data = response.json()
+
+                    # Navigate JSON structure
+                    trips = data.get("searchResults", {}).get("trips", [])
+                    for trip in trips:
+                        slices = trip.get("slice", [])
+                        if not slices:
+                            continue
+
+                        # Check NON-STOP (no layovers)
+                        nonstop = all(len(s.get("segment", [])) == 1 for s in slices)
+                        if not nonstop:
+                            continue
+
+                        price_info = trip.get("pricing", {}).get("totalPrice", {})
+                        amount = price_info.get("amount")
+                        if amount:
+                            prices.append(int(amount))
+            except Exception:
+                pass
+
+        page.on("response", handle_response)
+
+        page.goto(url, wait_until="networkidle")
+
+        browser.close()
 
     if not prices:
         return None
 
     return min(prices)
-
-
-def get_nonstop_price(url):
-    with sync_playwright() as p:
-        browser = p.chromium.launch(headless=True)
-        page = browser.new_page()
-        page.goto(url, wait_until="networkidle")
-
-        price = extract_price_from_page(page)
-
-        browser.close()
-
-    return price
 
 
 # --- MAIN LOGIC ---
@@ -86,7 +99,7 @@ hou_price = get_nonstop_price(HOU_URL)
 results["IAH"] = iah_price
 results["HOU"] = hou_price
 
-print("\n--- Non-Stop Round-Trip Price Results (Google Flights) ---")
+print("\n--- Non-Stop Round-Trip Price Results (Google Flights JSON) ---")
 for origin, price in results.items():
     print(f"{origin}: {price}")
 
