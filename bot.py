@@ -56,7 +56,12 @@ def check_price(origin):
     }
 
     r = requests.get(url, params=params)
+    try:
     data = r.json()
+except ValueError:
+    print("Non-JSON response received:")
+    print(r.text)
+    return None
 
     offers = data.get("data", [])
 
