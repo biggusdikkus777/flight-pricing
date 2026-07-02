@@ -21,9 +21,10 @@ jobs:
     - name: Install dependencies
       run: pip install -r requirements.txt
 
+    - name: Install Playwright Browsers
+      run: playwright install --with-deps
 
     - name: Run bot
       env:
-        IGNAV_API_KEY: ${{ secrets.IGNAV_API_KEY }}
         EMAIL_PASSWORD: ${{ secrets.EMAIL_PASSWORD }}
       run: python bot.py
