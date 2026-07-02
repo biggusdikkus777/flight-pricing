@@ -8,8 +8,8 @@ from email.mime.text import MIMEText
 API_KEY = os.getenv("TRAVELPAYOUTS_API_KEY")
 EMAIL_PASSWORD = os.getenv("EMAIL_PASSWORD")  # Gmail app password
 
-FROM_EMAIL = "your_email_here@gmail.com"      # <-- update this
-TO_EMAIL = "your_email_here@gmail.com"        # <-- daily summary email
+FROM_EMAIL = "tom.scire@gmail.com"      # <-- update this
+TO_EMAIL = "tom.scire@gmail.com"        # <-- daily summary email
 SMS_EMAIL = "8327256861@vtext.com"            # Verizon SMS gateway (free SMS)
 
 ORIGINS = ["IAH", "HOU"]                      # Multiple Houston airports
@@ -45,7 +45,7 @@ def send_daily_summary(message):
 # --- PRICE CHECK FUNCTION (NON-STOP ONLY + SAFE JSON LOADER) ---
 
 def check_price(origin):
-    url = "https://api.travelpayouts.com/aviasales/v3/prices"
+    url = "https://api.travelpayouts.com/aviasales/v3/prices_for_dates"
     params = {
         "origin": origin,
         "destination": DESTINATION,
