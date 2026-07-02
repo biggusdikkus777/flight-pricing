@@ -1,24 +1,20 @@
-import requests
 import os
 import smtplib
 from email.mime.text import MIMEText
+from playwright.sync_api import sync_playwright
 
 # --- CONFIGURATION ---
 
-API_KEY = os.getenv("TRAVELPAYOUTS_API_KEY")
 EMAIL_PASSWORD = os.getenv("EMAIL_PASSWORD")  # Gmail app password
 
 FROM_EMAIL = "tom.scire@gmail.com"
 TO_EMAIL = "tom.scire@gmail.com"
 SMS_EMAIL = "8327256861@vtext.com"  # Verizon SMS gateway
 
-ORIGINS = ["IAH", "HOU"]
-DESTINATION = "BZE"
-
-DEPART_DATE = "2027-01-30"
-RETURN_DATE = "2027-02-07"
-
 THRESHOLD = 500
+
+IAH_URL = "https://www.google.com/travel/flights/search?tfs=CBwQAhoeEgoyMDI3LTAxLTMwagcIARIDSUFIcgcIARIDQlpFGh4SCjIwMjctMDItMDdqBwgBEgNCWkVyBwgBEgNJQUhAAUgBcAGCAQsI____________AZgBAQ&hl=en-US&gl=US"
+HOU_URL = "https://www.google.com/travel/flights/search?tfs=CBwQAhoeEgoyMDI3LTAxLTMwagcIARIDSE9VcgcIARIDQlpFGh4SCjIwMjctMDItMDdqBwgBEgNCWkVyBwgBEgNIT1VAAUgBcAGCAQsI____________AZgBAQ&tfu=EgYIABAAGAA&hl=en-US&gl=US"
 
 
 # --- EMAIL FUNCTIONS ---
@@ -42,65 +38,63 @@ def send_daily_summary(message):
     send_email("Daily Flight Price Summary", message, [TO_EMAIL])
 
 
-# --- ONE-WAY PRICE CHECK (NON-STOP ONLY + SAFE JSON LOADER) ---
+# --- GOOGLE FLIGHTS SCRAPING (NON-STOP ONLY) ---
 
-def check_one_way(origin, destination, date):
-    url = "https://api.travelpayouts.com/aviasales/v3/prices_for_dates"
-    params = {
-        "origin": origin,
-        "destination": destination,
-        "depart_date": date,
-        "currency": "usd",
-        "token": API_KEY
-    }
+def extract_price_from_page(page):
+    # This selector targets price text in the main results list.
+    # You may need to tweak it if Google changes layout.
+    elements = page.query_selector_all('div[aria-label*="Nonstop"] span[aria-label^="$"]')
+    prices = []
 
-    r = requests.get(url, params=params)
+    for el in elements:
+        text = el.get_attribute("aria-label") or el.inner_text()
+        if not text:
+            continue
+        text = text.replace(",", "").strip()
+        if text.startswith("$"):
+            try:
+                prices.append(int(text[1:]))
+            except ValueError:
+                continue
 
-    try:
-        data = r.json()
-    except ValueError:
-        print(f"Non-JSON response for {origin} → {destination}:")
-        print(r.text)
+    if not prices:
         return None
 
-    offers = data.get("data", [])
+    return min(prices)
 
-    if not offers:
-        print(f"No offers returned for {origin} → {destination}.")
-        return None
 
-    nonstop = [o for o in offers if o.get("number_of_changes", 99) == 0]
+def get_nonstop_price(url):
+    with sync_playwright() as p:
+        browser = p.chromium.launch(headless=True)
+        page = browser.new_page()
+        page.goto(url, wait_until="networkidle")
 
-    if not nonstop:
-        print(f"No NON-STOP flights for {origin} → {destination}.")
-        return None
+        price = extract_price_from_page(page)
 
-    return nonstop[0]["value"]
+        browser.close()
+
+    return price
 
 
 # --- MAIN LOGIC ---
 
 results = {}
 
-for origin in ORIGINS:
-    outbound = check_one_way(origin, DESTINATION, DEPART_DATE)
-    inbound = check_one_way(DESTINATION, origin, RETURN_DATE)
+iah_price = get_nonstop_price(IAH_URL)
+hou_price = get_nonstop_price(HOU_URL)
 
-    if outbound is None or inbound is None:
-        results[origin] = None
-    else:
-        results[origin] = outbound + inbound
+results["IAH"] = iah_price
+results["HOU"] = hou_price
 
-print("\n--- Round-Trip Price Results (One-Way Combined) ---")
+print("\n--- Non-Stop Round-Trip Price Results (Google Flights) ---")
 for origin, price in results.items():
     print(f"{origin}: {price}")
 
 valid_prices = {o: p for o, p in results.items() if p is not None}
 
-# Build daily summary email
-summary = "Daily Flight Price Summary (One-Way Combined)\n\n"
-summary += f"Route: {ORIGINS} → {DESTINATION}\n"
-summary += f"Depart: {DEPART_DATE}\nReturn: {RETURN_DATE}\n\n"
+summary = "Daily Flight Price Summary (Google Flights Non-Stop)\n\n"
+summary += "Route: IAH/HOU → BZE\n"
+summary += "Depart: 2027-01-30\nReturn: 2027-02-07\n\n"
 
 for origin, price in results.items():
     summary += f"{origin}: {price}\n"
@@ -115,7 +109,6 @@ else:
 print("Sending daily summary email...")
 send_daily_summary(summary)
 
-# Alerts
 if valid_prices:
     best_origin = min(valid_prices, key=valid_prices.get)
     best_price = valid_prices[best_origin]
@@ -123,8 +116,8 @@ if valid_prices:
     if best_price < THRESHOLD:
         alert_msg = (
             f"🔥 Price Alert!\n\n"
-            f"{best_origin} → {DESTINATION}\n"
-            f"Depart: {DEPART_DATE}\nReturn: {RETURN_DATE}\n"
+            f"{best_origin} → BZE\n"
+            f"Depart: 2027-01-30\nReturn: 2027-02-07\n"
             f"NON-STOP round-trip price: ${best_price}\n\n"
             f"Below your threshold of ${THRESHOLD}."
         )
