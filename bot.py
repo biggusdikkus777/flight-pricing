@@ -48,7 +48,7 @@ def get_nonstop_price(url):
         browser = p.chromium.launch(headless=True)
         page = browser.new_page()
 
-        # Block heavy resources to speed things up
+        # Block heavy resources to speed up Google Flights
         page.route("**/*", lambda route, request: (
             route.abort()
             if request.resource_type in ["image", "media", "font", "stylesheet"]
@@ -57,33 +57,32 @@ def get_nonstop_price(url):
 
         page.goto(url, wait_until="domcontentloaded")
 
-        # Wait for results to render
+        # Wait for flight cards to appear
         try:
-            page.wait_for_selector('div[aria-label*="Nonstop"]', timeout=10000)
+            page.wait_for_selector('div[role="listitem"]', timeout=15000)
         except Exception:
             browser.close()
             return None
 
-        # Find all NON-STOP flight cards
-        cards = page.query_selector_all('div[aria-label*="Nonstop"]')
-
+        cards = page.query_selector_all('div[role="listitem"]')
         prices = []
 
         for card in cards:
-            # Look for a price element inside the card
-            price_el = card.query_selector('span[aria-label^="$"]')
+            # Check if this card contains "Nonstop"
+            nonstop_label = card.query_selector('div:has-text("Nonstop")')
+            if not nonstop_label:
+                continue
+
+            # Extract price inside this card
+            price_el = card.query_selector('span:has-text("$")')
             if not price_el:
                 continue
 
-            text = price_el.get_attribute("aria-label") or price_el.inner_text()
-            if not text:
-                continue
-
-            text = text.replace(",", "").strip()
+            text = price_el.inner_text().strip().replace(",", "")
             if text.startswith("$"):
                 try:
                     prices.append(int(text[1:]))
-                except ValueError:
+                except:
                     continue
 
         browser.close()
