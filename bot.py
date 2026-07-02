@@ -69,21 +69,20 @@ def get_nonstop_price(url):
 
         for card in cards:
             # Check if this card contains "Nonstop"
-            nonstop_label = card.query_selector('div:has-text("Nonstop")')
-            if not nonstop_label:
+            if not card.query_selector(':has-text("Nonstop")'):
                 continue
 
             # Extract price inside this card
-            price_el = card.query_selector('span:has-text("$")')
+            price_el = card.query_selector(':has-text("$")')
             if not price_el:
                 continue
 
             text = price_el.inner_text().strip().replace(",", "")
-            if text.startswith("$"):
-                try:
-                    prices.append(int(text[1:]))
-                except:
-                    continue
+            # Find the first $### in the text
+            import re
+            match = re.search(r"\$(\d+)", text)
+            if match:
+                prices.append(int(match.group(1)))
 
         browser.close()
 
