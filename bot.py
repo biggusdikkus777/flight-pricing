@@ -46,15 +46,14 @@ def send_daily_summary(message):
 
 def check_price(origin):
     url = "https://api.travelpayouts.com/aviasales/v3/prices_for_dates"
-    params = {
-        "origin": origin,
-        "destination": DESTINATION,
-        "depart_date": DEPART_DATE,
-        "return_date": RETURN_DATE,
-        "currency": "usd",
-        "token": API_KEY
-    }
-
+params = {
+    "origin": origin,
+    "destination": DESTINATION,
+    "depart_date[]": DEPART_DATE,
+    "return_date[]": RETURN_DATE,
+    "currency": "usd",
+    "token": API_KEY
+}
     r = requests.get(url, params=params)
 
     # Safe JSON loader
